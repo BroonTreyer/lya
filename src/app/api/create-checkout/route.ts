@@ -1,80 +1,93 @@
-import { NextResponse } from 'next/server'
-import { createServerClient } from '@/lib/supabase'
-import { stripe } from '@/lib/stripe'
+import { NextResponse } from "next/server";
+import Stripe from "stripe";
+import { createServerClient } from "@/lib/supabase/server";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2024-10-28.acacia",
+});
 
 export async function POST(request: Request) {
   try {
-    // Valida se Stripe está configurado
-    if (!stripe) {
+    // Valida Stripe
+    if (!process.env.STRIPE_SECRET_KEY) {
       return NextResponse.json(
-        { error: 'Stripe não está configurado. Configure STRIPE_SECRET_KEY nas variáveis de ambiente.' },
+        { error: "Stripe não está configurado. Configure STRIPE_SECRET_KEY." },
         { status: 503 }
-      )
+      );
     }
 
-    const { priceId } = await request.json()
+    const { priceId } = await request.json();
 
     if (!priceId) {
       return NextResponse.json(
-        { error: 'Price ID é obrigatório' },
+        { error: "Price ID é obrigatório." },
         { status: 400 }
-      )
+      );
     }
 
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    // Supabase server client
+    const supabase = createServerClient();
+
+    // Verifica usuário autenticado
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json(
-        { error: 'Usuário não autenticado' },
+        { error: "Usuário não autenticado." },
         { status: 401 }
-      )
+      );
     }
 
-    // Busca ou cria customer na Stripe
-    let customerId: string
+    // Verifica se usuário já tem customer_id
+    let customerId: string;
 
-    const { data: subscription } = await supabase
-      .from('subscriptions')
-      .select('stripe_customer_id')
-      .eq('user_id', user.id)
-      .single()
+    const { data: existingSub } = await supabase
+      .from("subscriptions")
+      .select("stripe_customer_id")
+      .eq("user_id", user.id)
+      .single();
 
-    if (subscription?.stripe_customer_id) {
-      customerId = subscription.stripe_customer_id
+    if (existingSub?.stripe_customer_id) {
+      customerId = existingSub.stripe_customer_id;
     } else {
+      // Cria customer na Stripe
       const customer = await stripe.customers.create({
-        email: user.email,
+        email: user.email!,
         metadata: {
           supabase_user_id: user.id,
         },
-      })
-      customerId = customer.id
+      });
+
+      customerId = customer.id;
     }
 
     // Cria sessão de checkout
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
+      mode: "subscription",
+      payment_method_types: ["card"],
       line_items: [
         {
           price: priceId,
           quantity: 1,
         },
       ],
-      mode: 'subscription',
-      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/dashboard?success=true`,
-      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/?canceled=true`,
+      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/success`,
+      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/cancel`,
       metadata: {
         user_id: user.id,
+        price_id: priceId,
       },
-    })
+    });
 
-    return NextResponse.json({ sessionId: session.id, url: session.url })
+    return NextResponse.json({ sessionId: session.id, url: session.url });
   } catch (error) {
-    console.error('Erro ao criar checkout:', error)
+    console.error("Erro ao criar checkout:", error);
     return NextResponse.json(
-      { error: 'Erro ao criar sessão de checkout' },
+      { error: "Erro ao criar sessão de checkout." },
       { status: 500 }
-    )
+    );
   }
 }

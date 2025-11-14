@@ -2,177 +2,173 @@ import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest } from "next/server";
 
-export const runtime = "nodejs";
+export const runtime = "nodejs"; // Obrigatório para Webhook Stripe
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+// Inicializa Stripe
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2024-12-18.acacia",
+});
 
+// Supabase usando SERVICE ROLE (permite bypass do RLS)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
 export async function POST(req: NextRequest) {
-  const sig = req.headers.get("stripe-signature");
-  const body = await req.text();
+  const signature = req.headers.get("stripe-signature");
+  const rawBody = await req.text();
 
   let event: Stripe.Event;
 
   try {
     event = stripe.webhooks.constructEvent(
-      body,
-      sig as string,
+      rawBody,
+      signature as string,
       process.env.STRIPE_WEBHOOK_SECRET!
     );
   } catch (err: any) {
-    console.error("Stripe webhook signature error:", err.message);
+    console.error("❌ Erro de verificação do Webhook:", err.message);
     return new Response(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
-  console.log(`✅ Webhook recebido: ${event.type}`);
+  console.log(`⚡ Evento Stripe recebido: ${event.type}`);
 
-  switch (event.type) {
-    case "checkout.session.completed": {
-      const session = event.data.object as Stripe.Checkout.Session;
+  // ---------------------------------------------------------------
+  // CHECKOUT SESSION COMPLETED
+  // ---------------------------------------------------------------
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
 
-      const customerId = session.customer as string | null;
-      const subscriptionId = session.subscription as string | null;
-      const email = session.customer_details?.email ?? null;
+    const email = session.customer_details?.email ?? null;
+    const customerId = session.customer as string | null;
+    const subscriptionId = session.subscription as string | null;
 
-      console.log(`📧 Checkout completado para email: ${email}`);
+    console.log("📨 Email no checkout:", email);
 
-      if (!email) {
-        console.error("❌ checkout.session.completed sem email");
-        break;
-      }
-
-      // Buscar perfil pelo email
-      const { data: profile, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("email", email)
-        .maybeSingle();
-
-      if (error) {
-        console.error("❌ Erro ao buscar profile:", error);
-        break;
-      }
-      if (!profile) {
-        console.error(`❌ Profile não encontrado para email: ${email}`);
-        break;
-      }
-
-      console.log(`👤 Profile encontrado: ${profile.id}`);
-
-      // Definir plan_type (vitalício ou assinatura)
-      let planType: string | null = null;
-
-      if (session.mode === "payment") {
-        planType = "vitalicio";
-        console.log("💎 Plano vitalício detectado");
-      } else if (session.mode === "subscription") {
-        // pegar do metadata
-        planType = (session.metadata?.plan_type as string) ?? null;
-        console.log(`📅 Plano recorrente detectado: ${planType}`);
-      }
-
-      const subscriptionStatus = planType === "vitalicio" ? "lifetime" : "active";
-
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({
-          stripe_customer_id: customerId,
-          stripe_subscription_id: subscriptionId,
-          subscription_status: subscriptionStatus,
-          plan_type: planType,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", profile.id);
-
-      if (updateError) {
-        console.error("❌ Erro ao atualizar profile após checkout:", updateError);
-      } else {
-        console.log(`✅ Profile atualizado com sucesso:`, {
-          profileId: profile.id,
-          planType,
-          subscriptionStatus,
-          customerId,
-          subscriptionId,
-        });
-      }
-
-      break;
+    if (!email) {
+      console.error("❌ checkout.session.completed SEM email");
+      return new Response("NO EMAIL", { status: 400 });
     }
 
-    case "customer.subscription.created": {
-      const sub = event.data.object as Stripe.Subscription;
+    // Buscar perfil pelo email
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("email", email)
+      .maybeSingle();
 
-      console.log(`🆕 Subscription criada: ${sub.id} para customer: ${sub.customer}`);
-
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({
-          stripe_subscription_id: sub.id,
-          subscription_status: sub.status,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("stripe_customer_id", sub.customer as string);
-
-      if (updateError) {
-        console.error("❌ Erro ao atualizar subscription criada:", updateError);
-      } else {
-        console.log(`✅ Subscription ${sub.id} vinculada ao profile`);
-      }
-
-      break;
+    if (profileError) {
+      console.error("❌ Erro ao buscar perfil:", profileError);
+      return new Response("PROFILE ERROR", { status: 500 });
     }
 
-    case "customer.subscription.updated": {
-      const sub = event.data.object as Stripe.Subscription;
-
-      console.log(`🔄 Subscription atualizada: ${sub.id} - novo status: ${sub.status}`);
-
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({
-          subscription_status: sub.status,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("stripe_subscription_id", sub.id);
-
-      if (updateError) {
-        console.error("❌ Erro ao atualizar subscription:", updateError);
-      } else {
-        console.log(`✅ Status da subscription atualizado para: ${sub.status}`);
-      }
-
-      break;
+    if (!profile) {
+      console.error("❌ Nenhum perfil encontrado para:", email);
+      return new Response("NO PROFILE", { status: 404 });
     }
 
-    case "customer.subscription.deleted": {
-      const sub = event.data.object as Stripe.Subscription;
+    console.log("👤 Perfil encontrado:", profile.id);
 
-      console.log(`🗑️ Subscription deletada: ${sub.id}`);
+    // Detectar tipo de plano
+    let planType =
+      session.mode === "payment"
+        ? "vitalicio"
+        : (session.metadata?.plan_type as string) ?? null;
 
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({
-          subscription_status: "canceled",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("stripe_subscription_id", sub.id);
+    const subscriptionStatus =
+      planType === "vitalicio" ? "lifetime" : "active";
 
-      if (updateError) {
-        console.error("❌ Erro ao cancelar subscription:", updateError);
-      } else {
-        console.log(`✅ Subscription ${sub.id} cancelada com sucesso`);
-      }
+    // Atualizar perfil
+    const { error: updateError } = await supabase
+      .from("profiles")
+      .update({
+        stripe_customer_id: customerId,
+        stripe_subscription_id: subscriptionId,
+        subscription_status: subscriptionStatus,
+        plan_type: planType,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", profile.id);
 
-      break;
+    if (updateError) {
+      console.error("❌ Erro ao atualizar perfil no checkout:", updateError);
+    } else {
+      console.log("✅ Perfil atualizado com sucesso:", {
+        profileId: profile.id,
+        customerId,
+        subscriptionId,
+        subscriptionStatus,
+        planType,
+      });
     }
+  }
 
-    default:
-      // Apenas logar eventos não tratados
-      console.log(`ℹ️ Evento Stripe ignorado: ${event.type}`);
+  // ---------------------------------------------------------------
+  // SUBSCRIPTION CREATED
+  // ---------------------------------------------------------------
+  if (event.type === "customer.subscription.created") {
+    const sub = event.data.object as Stripe.Subscription;
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        stripe_subscription_id: sub.id,
+        subscription_status: sub.status,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("stripe_customer_id", sub.customer as string);
+
+    if (error) console.error("❌ Erro ao salvar nova subscription:", error);
+    else console.log("🆕 Subscription registrada:", sub.id);
+  }
+
+  // ---------------------------------------------------------------
+  // SUBSCRIPTION UPDATED
+  // ---------------------------------------------------------------
+  if (event.type === "customer.subscription.updated") {
+    const sub = event.data.object as Stripe.Subscription;
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        subscription_status: sub.status,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("stripe_subscription_id", sub.id);
+
+    if (error)
+      console.error("❌ Erro ao atualizar subscription:", error);
+    else
+      console.log("🔄 Subscription atualizada:", {
+        id: sub.id,
+        status: sub.status,
+      });
+  }
+
+  // ---------------------------------------------------------------
+  // SUBSCRIPTION CANCELED
+  // ---------------------------------------------------------------
+  if (event.type === "customer.subscription.deleted") {
+    const sub = event.data.object as Stripe.Subscription;
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        subscription_status: "canceled",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("stripe_subscription_id", sub.id);
+
+    if (error)
+      console.error("❌ Erro ao cancelar subscription:", error);
+    else
+      console.log("🛑 Subscription cancelada:", sub.id);
+  }
+
+  // Eventos ignorados
+  else {
+    console.log("ℹ️ Evento ignorado:", event.type);
   }
 
   return new Response("OK", { status: 200 });

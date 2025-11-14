@@ -5,7 +5,7 @@ import { createServerClient } from "@/lib/supabase/server";
 
 export const config = {
   api: {
-    bodyParser: false, // obrigatório para o Stripe Webhook funcionar
+    bodyParser: false,
   },
 };
 
@@ -35,16 +35,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const supabase = createServerClient();
+  // ❗ CORREÇÃO FUNDAMENTAL — SUPABASE SERVER CLIENT
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
   try {
     switch (event.type) {
-      //---------------------------
-      // CHECKOUT SESSION COMPLETED
-      //---------------------------
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-
         const userId = session.metadata?.user_id;
         const priceId = session.metadata?.price_id;
 
@@ -74,9 +74,6 @@ export async function POST(request: Request) {
         break;
       }
 
-      //---------------------------
-      // SUBSCRIPTION UPDATED
-      //---------------------------
       case "customer.subscription.updated": {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
@@ -106,9 +103,6 @@ export async function POST(request: Request) {
         break;
       }
 
-      //---------------------------
-      // SUBSCRIPTION CANCELED
-      //---------------------------
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
@@ -131,18 +125,16 @@ export async function POST(request: Request) {
         break;
       }
 
-      //---------------------------
-      // PAYMENT SUCCEEDED
-      //---------------------------
       case "invoice.payment_succeeded": {
         const invoice = event.data.object as Stripe.Invoice;
-
         const subscriptionId = invoice.subscription as string;
+
         if (!subscriptionId) break;
 
         const subscription = await stripe.subscriptions.retrieve(
           subscriptionId
         );
+
         const customerId = subscription.customer as string;
 
         const { data: existing } = await supabase
@@ -165,7 +157,6 @@ export async function POST(request: Request) {
             })
             .eq("user_id", existing.user_id);
 
-          // registra pagamento
           await supabase.from("payments").insert({
             user_id: existing.user_id,
             stripe_payment_intent_id: invoice.payment_intent as string,
@@ -178,12 +169,8 @@ export async function POST(request: Request) {
         break;
       }
 
-      //---------------------------
-      // PAYMENT FAILED
-      //---------------------------
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
-
         const subscriptionId = invoice.subscription as string;
         if (!subscriptionId) break;
 

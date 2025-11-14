@@ -8,14 +8,17 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 
 export async function POST() {
   try {
-    // Criar cliente supabase SSR
-    const supabase = createServerClient();
+    // ✅ CORREÇÃO IMPORTANTE — SUPABASE SERVER CLIENT
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
+    // Verifica o usuário autenticado
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
-    // Verifica autenticação
     if (!user) {
       return NextResponse.json(
         { error: "Usuário não autenticado" },
@@ -23,7 +26,7 @@ export async function POST() {
       );
     }
 
-    // Busca customer_id
+    // Busca customer_id no banco
     const { data: subscription } = await supabase
       .from("subscriptions")
       .select("stripe_customer_id")
@@ -37,7 +40,7 @@ export async function POST() {
       );
     }
 
-    // Cria o Portal da Stripe (gerenciador de assinatura)
+    // Cria sessão do portal Stripe
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: subscription.stripe_customer_id,
       return_url: `${process.env.NEXT_PUBLIC_SITE_URL}/dashboard`,

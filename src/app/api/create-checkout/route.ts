@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createServerClient } from "@/lib/supabase/server";
 
+// Instância do Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-10-28.acacia",
+  apiVersion: "2024-06-20",
 });
 
 export async function POST(request: Request) {
   try {
-    // Valida Stripe
+    // Validação Stripe
     if (!process.env.STRIPE_SECRET_KEY) {
       return NextResponse.json(
         { error: "Stripe não está configurado. Configure STRIPE_SECRET_KEY." },
@@ -20,15 +21,14 @@ export async function POST(request: Request) {
 
     if (!priceId) {
       return NextResponse.json(
-        { error: "Price ID é obrigatório." },
+        { error: "O campo priceId é obrigatório." },
         { status: 400 }
       );
     }
 
-    // Supabase server client
+    // Supabase (lado servidor)
     const supabase = createServerClient();
 
-    // Verifica usuário autenticado
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Verifica se usuário já tem customer_id
+    // Verifica customer_id existente
     let customerId: string;
 
     const { data: existingSub } = await supabase
@@ -52,9 +52,9 @@ export async function POST(request: Request) {
     if (existingSub?.stripe_customer_id) {
       customerId = existingSub.stripe_customer_id;
     } else {
-      // Cria customer na Stripe
+      // Criar novo customer
       const customer = await stripe.customers.create({
-        email: user.email!,
+        email: user.email ?? undefined,
         metadata: {
           supabase_user_id: user.id,
         },
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       customerId = customer.id;
     }
 
-    // Cria sessão de checkout
+    // Criar sessão de checkout da assinatura
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       mode: "subscription",
@@ -82,7 +82,10 @@ export async function POST(request: Request) {
       },
     });
 
-    return NextResponse.json({ sessionId: session.id, url: session.url });
+    return NextResponse.json({
+      sessionId: session.id,
+      url: session.url,
+    });
   } catch (error) {
     console.error("Erro ao criar checkout:", error);
     return NextResponse.json(

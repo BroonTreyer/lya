@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createBrowserClient as createClient } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client"; // ✔ CORRIGIDO
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Download, FileText, File } from "lucide-react";
+import { ArrowLeft, Download, File as FileIcon } from "lucide-react";
 
 export default function MateriaisPage() {
   const router = useRouter();
@@ -17,8 +17,10 @@ export default function MateriaisPage() {
 
   async function checkAuth() {
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
     if (!user) {
       router.push("/login");
       return;
@@ -52,20 +54,22 @@ export default function MateriaisPage() {
     {
       id: 1,
       title: "Guia Completo - Fundamentos",
-      description: "PDF com todos os conceitos fundamentais explicados detalhadamente",
+      description:
+        "PDF com todos os conceitos fundamentais explicados detalhadamente",
       type: "PDF",
       size: "2.5 MB",
       pages: 45,
-      icon: "📄"
+      icon: "📄",
     },
     {
       id: 2,
       title: "Apostila Prática",
-      description: "Exercícios práticos e exemplos reais para aplicação imediata",
+      description:
+        "Exercícios práticos e exemplos reais para aplicação imediata",
       type: "PDF",
       size: "3.8 MB",
       pages: 68,
-      icon: "📚"
+      icon: "📚",
     },
     {
       id: 3,
@@ -74,7 +78,7 @@ export default function MateriaisPage() {
       type: "PDF",
       size: "1.2 MB",
       pages: 12,
-      icon: "✅"
+      icon: "✅",
     },
     {
       id: 4,
@@ -83,7 +87,7 @@ export default function MateriaisPage() {
       type: "DOCX",
       size: "890 KB",
       pages: 25,
-      icon: "📝"
+      icon: "📝",
     },
     {
       id: 5,
@@ -92,7 +96,7 @@ export default function MateriaisPage() {
       type: "XLSX",
       size: "1.5 MB",
       pages: 8,
-      icon: "📊"
+      icon: "📊",
     },
     {
       id: 6,
@@ -101,8 +105,8 @@ export default function MateriaisPage() {
       type: "PDF",
       size: "4.2 MB",
       pages: 15,
-      icon: "🎨"
-    }
+      icon: "🎨",
+    },
   ];
 
   return (
@@ -121,7 +125,9 @@ export default function MateriaisPage() {
               Voltar
             </Button>
             <div>
-              <h1 className="text-2xl font-bold text-white">Materiais Didáticos</h1>
+              <h1 className="text-2xl font-bold text-white">
+                Materiais Didáticos
+              </h1>
               <p className="text-sm text-gray-400">
                 {materiais.length} materiais disponíveis para download
               </p>
@@ -156,7 +162,7 @@ export default function MateriaisPage() {
                   {/* Meta Info */}
                   <div className="flex items-center gap-4 text-xs text-gray-500 mb-4">
                     <span className="flex items-center gap-1">
-                      <File className="w-3 h-3" />
+                      <FileIcon className="w-3 h-3" />
                       {material.type}
                     </span>
                     <span>{material.size}</span>
@@ -179,9 +185,13 @@ export default function MateriaisPage() {
           <div className="flex items-start gap-4">
             <div className="text-4xl">💡</div>
             <div>
-              <h3 className="text-lg font-bold text-white mb-2">Dica Importante</h3>
+              <h3 className="text-lg font-bold text-white mb-2">
+                Dica Importante
+              </h3>
               <p className="text-gray-300">
-                Todos os materiais são atualizados regularmente. Volte sempre para conferir novos conteúdos e versões atualizadas dos materiais existentes.
+                Todos os materiais são atualizados regularmente. Volte sempre
+                para conferir novos conteúdos e versões atualizadas dos
+                materiais existentes.
               </p>
             </div>
           </div>

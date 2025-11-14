@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Lock, Check, CreditCard, Shield, Sparkles, Crown, Zap } from "lucide-react";
 import { createBrowserClient as createClient } from "@/lib/supabase";
 
-export default function checkoutcontent() {
+export default function CheckoutContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const planParam = searchParams.get("plan");

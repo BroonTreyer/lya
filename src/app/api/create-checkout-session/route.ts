@@ -13,7 +13,7 @@ const PRICE_IDS = {
   price_lifetime: "price_1ST39qLYcZqHrP6JqygJ4AT4",
 };
 
-// Mapeamento dos tipos de plano para salvar no webhook
+// Mapeamento dos tipos de plano
 const PLAN_TYPES = {
   price_weekly: "semanal",
   price_monthly: "mensal",
@@ -31,10 +31,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Inicializa Supabase Server-side
+    // Cliente Supabase lado servidor
     const supabase = createServerClient();
 
-    // Descobre o usuário REAL (seguro)
+    // Descobre o usuário autenticado
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -46,30 +46,37 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Price ID real do Stripe
+    // Price real no Stripe
     const stripePriceId =
       PRICE_IDS[priceId as keyof typeof PRICE_IDS] || priceId;
 
     const planType =
       PLAN_TYPES[priceId as keyof typeof PLAN_TYPES] || "mensal";
 
-    // Vitalício = pagamento único
+    // Vitalício → pagamento único
     const mode = planType === "vitalicio" ? "payment" : "subscription";
 
-    // Sessão de checkout no Stripe
+    // URL base do app (fallback incluído)
+    const BASE_URL =
+      process.env.NEXT_PUBLIC_APP_URL ||
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      "https://b88899f5-novo-app-alpha.lasy.pro";
+
+    // Cria sessão de checkout
     const session = await stripe.checkout.sessions.create({
       mode,
       payment_method_types: ["card"],
+
       line_items: [
         {
           price: stripePriceId,
           quantity: 1,
         },
       ],
-      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/membros?success=true`,
-      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/checkout?canceled=true`,
-      
-      // O webhook irá atualizar o Supabase
+
+      success_url: `${BASE_URL}/membros?success=true`,
+      cancel_url: `${BASE_URL}/checkout?canceled=true`,
+
       metadata: {
         user_id: user.id,
         plan_type: planType,

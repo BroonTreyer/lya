@@ -1,17 +1,16 @@
 export const dynamic = "force-dynamic";
 
+"use client";
 
-"use client"
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { XCircle, ArrowLeft } from "lucide-react";
+import Link from "next/link";
 
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { XCircle, ArrowLeft } from "lucide-react"
-import Link from "next/link"
-import { useLanguage } from "@/contexts/LanguageContext"
+// Fallback simples para evitar erro de Provider
+const t = (text: string) => text;
 
 export default function CancelPage() {
-  const { t } = useLanguage()
-
   return (
     <div className="min-h-screen bg-[#0B0B0D] flex items-center justify-center px-4">
       <Card className="max-w-2xl w-full bg-[#121214] border-[#9A8F88]/20">

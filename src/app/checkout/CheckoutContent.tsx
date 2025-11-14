@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Lock, Check, CreditCard, Shield, Sparkles, Crown, Zap } from "lucide-react";
-import { createBrowserClient as createClient } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 
 export default function CheckoutContent() {
   const router = useRouter();

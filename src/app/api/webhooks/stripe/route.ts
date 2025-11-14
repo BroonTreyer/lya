@@ -1,182 +1,222 @@
-import { NextResponse } from 'next/server'
-import { headers } from 'next/headers'
-import { stripe } from '@/lib/stripe'
-import { createServerClient } from '@/lib/supabase'
-import Stripe from 'stripe'
+import { NextResponse } from "next/server";
+import { headers } from "next/headers";
+import Stripe from "stripe";
+import { createServerClient } from "@/lib/supabase/server";
 
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!
+export const config = {
+  api: {
+    bodyParser: false, // obrigatório para o Stripe Webhook funcionar
+  },
+};
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2024-10-28.acacia",
+});
+
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
 export async function POST(request: Request) {
-  const body = await request.text()
-  const headersList = await headers()
-  const signature = headersList.get('stripe-signature')!
+  const rawBody = await request.text();
+  const signature = (await headers()).get("stripe-signature")!;
 
-  let event: Stripe.Event
+  let event: Stripe.Event;
 
   try {
-    event = stripe.webhooks.constructEvent(body, signature, webhookSecret)
+    event = stripe.webhooks.constructEvent(
+      rawBody,
+      signature,
+      webhookSecret
+    );
   } catch (err) {
-    console.error('Erro ao verificar webhook:', err)
+    console.error("Erro ao verificar webhook:", err);
     return NextResponse.json(
-      { error: 'Webhook signature verification failed' },
+      { error: "Webhook signature verification failed" },
       { status: 400 }
-    )
+    );
   }
 
-  const supabase = await createClient()
+  const supabase = createServerClient();
 
   try {
     switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object as Stripe.Checkout.Session
-        const userId = session.metadata?.user_id
+      //---------------------------
+      // CHECKOUT SESSION COMPLETED
+      //---------------------------
+      case "checkout.session.completed": {
+        const session = event.data.object as Stripe.Checkout.Session;
 
-        if (!userId) {
-          throw new Error('User ID não encontrado no metadata')
+        const userId = session.metadata?.user_id;
+        const priceId = session.metadata?.price_id;
+
+        if (!userId || !priceId) {
+          throw new Error("Metadata ausente no checkout.");
         }
 
-        // Busca a subscription criada
         const subscription = await stripe.subscriptions.retrieve(
           session.subscription as string
-        )
+        );
 
-        // Salva/atualiza no Supabase
-        await supabase.from('subscriptions').upsert({
+        await supabase.from("subscriptions").upsert({
           user_id: userId,
           stripe_customer_id: session.customer as string,
           stripe_subscription_id: subscription.id,
-          stripe_price_id: subscription.items.data[0].price.id,
-          status: 'active',
-          current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-          current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+          stripe_price_id: priceId,
+          status: "active",
+          current_period_start: new Date(
+            subscription.current_period_start * 1000
+          ).toISOString(),
+          current_period_end: new Date(
+            subscription.current_period_end * 1000
+          ).toISOString(),
           cancel_at_period_end: subscription.cancel_at_period_end,
-        })
+        });
 
-        break
+        break;
       }
 
-      case 'customer.subscription.updated': {
-        const subscription = event.data.object as Stripe.Subscription
-        const customerId = subscription.customer as string
+      //---------------------------
+      // SUBSCRIPTION UPDATED
+      //---------------------------
+      case "customer.subscription.updated": {
+        const subscription = event.data.object as Stripe.Subscription;
+        const customerId = subscription.customer as string;
 
-        // Busca user_id pelo customer_id
-        const { data: existingSubscription } = await supabase
-          .from('subscriptions')
-          .select('user_id')
-          .eq('stripe_customer_id', customerId)
-          .single()
+        const { data: existing } = await supabase
+          .from("subscriptions")
+          .select("user_id")
+          .eq("stripe_customer_id", customerId)
+          .single();
 
-        if (existingSubscription) {
+        if (existing) {
           await supabase
-            .from('subscriptions')
+            .from("subscriptions")
             .update({
-              status: subscription.status as any,
-              current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-              current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+              status: subscription.status,
+              current_period_start: new Date(
+                subscription.current_period_start * 1000
+              ).toISOString(),
+              current_period_end: new Date(
+                subscription.current_period_end * 1000
+              ).toISOString(),
               cancel_at_period_end: subscription.cancel_at_period_end,
             })
-            .eq('user_id', existingSubscription.user_id)
+            .eq("user_id", existing.user_id);
         }
 
-        break
+        break;
       }
 
-      case 'customer.subscription.deleted': {
-        const subscription = event.data.object as Stripe.Subscription
-        const customerId = subscription.customer as string
+      //---------------------------
+      // SUBSCRIPTION CANCELED
+      //---------------------------
+      case "customer.subscription.deleted": {
+        const subscription = event.data.object as Stripe.Subscription;
+        const customerId = subscription.customer as string;
 
-        // Busca user_id pelo customer_id
-        const { data: existingSubscription } = await supabase
-          .from('subscriptions')
-          .select('user_id')
-          .eq('stripe_customer_id', customerId)
-          .single()
+        const { data: existing } = await supabase
+          .from("subscriptions")
+          .select("user_id")
+          .eq("stripe_customer_id", customerId)
+          .single();
 
-        if (existingSubscription) {
+        if (existing) {
           await supabase
-            .from('subscriptions')
+            .from("subscriptions")
             .update({
-              status: 'canceled',
+              status: "canceled",
             })
-            .eq('user_id', existingSubscription.user_id)
+            .eq("user_id", existing.user_id);
         }
 
-        break
+        break;
       }
 
-      case 'invoice.payment_succeeded': {
-        const invoice = event.data.object as Stripe.Invoice
-        const subscriptionId = invoice.subscription as string
+      //---------------------------
+      // PAYMENT SUCCEEDED
+      //---------------------------
+      case "invoice.payment_succeeded": {
+        const invoice = event.data.object as Stripe.Invoice;
 
-        if (subscriptionId) {
-          const subscription = await stripe.subscriptions.retrieve(subscriptionId)
-          const customerId = subscription.customer as string
+        const subscriptionId = invoice.subscription as string;
+        if (!subscriptionId) break;
 
-          const { data: existingSubscription } = await supabase
-            .from('subscriptions')
-            .select('user_id')
-            .eq('stripe_customer_id', customerId)
-            .single()
+        const subscription = await stripe.subscriptions.retrieve(
+          subscriptionId
+        );
+        const customerId = subscription.customer as string;
 
-          if (existingSubscription) {
-            // Atualiza status para active
-            await supabase
-              .from('subscriptions')
-              .update({
-                status: 'active',
-                current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-                current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-              })
-              .eq('user_id', existingSubscription.user_id)
+        const { data: existing } = await supabase
+          .from("subscriptions")
+          .select("user_id")
+          .eq("stripe_customer_id", customerId)
+          .single();
 
-            // Registra pagamento
-            await supabase.from('payments').insert({
-              user_id: existingSubscription.user_id,
-              stripe_payment_intent_id: invoice.payment_intent as string,
-              amount: invoice.amount_paid,
-              currency: invoice.currency,
-              status: 'succeeded',
+        if (existing) {
+          await supabase
+            .from("subscriptions")
+            .update({
+              status: "active",
+              current_period_start: new Date(
+                subscription.current_period_start * 1000
+              ).toISOString(),
+              current_period_end: new Date(
+                subscription.current_period_end * 1000
+              ).toISOString(),
             })
-          }
+            .eq("user_id", existing.user_id);
+
+          // registra pagamento
+          await supabase.from("payments").insert({
+            user_id: existing.user_id,
+            stripe_payment_intent_id: invoice.payment_intent as string,
+            amount: invoice.amount_paid,
+            currency: invoice.currency,
+            status: "succeeded",
+          });
         }
 
-        break
+        break;
       }
 
-      case 'invoice.payment_failed': {
-        const invoice = event.data.object as Stripe.Invoice
-        const subscriptionId = invoice.subscription as string
+      //---------------------------
+      // PAYMENT FAILED
+      //---------------------------
+      case "invoice.payment_failed": {
+        const invoice = event.data.object as Stripe.Invoice;
 
-        if (subscriptionId) {
-          const subscription = await stripe.subscriptions.retrieve(subscriptionId)
-          const customerId = subscription.customer as string
+        const subscriptionId = invoice.subscription as string;
+        if (!subscriptionId) break;
 
-          const { data: existingSubscription } = await supabase
-            .from('subscriptions')
-            .select('user_id')
-            .eq('stripe_customer_id', customerId)
-            .single()
+        const subscription = await stripe.subscriptions.retrieve(
+          subscriptionId
+        );
+        const customerId = subscription.customer as string;
 
-          if (existingSubscription) {
-            await supabase
-              .from('subscriptions')
-              .update({
-                status: 'past_due',
-              })
-              .eq('user_id', existingSubscription.user_id)
-          }
+        const { data: existing } = await supabase
+          .from("subscriptions")
+          .select("user_id")
+          .eq("stripe_customer_id", customerId)
+          .single();
+
+        if (existing) {
+          await supabase
+            .from("subscriptions")
+            .update({
+              status: "past_due",
+            })
+            .eq("user_id", existing.user_id);
         }
 
-        break
+        break;
       }
     }
 
-    return NextResponse.json({ received: true })
+    return NextResponse.json({ received: true }, { status: 200 });
   } catch (error) {
-    console.error('Erro ao processar webhook:', error)
+    console.error("Erro ao processar webhook:", error);
     return NextResponse.json(
-      { error: 'Erro ao processar webhook' },
+      { error: "Erro ao processar webhook" },
       { status: 500 }
-    )
+    );
   }
 }
